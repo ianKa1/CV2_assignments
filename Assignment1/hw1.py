@@ -1,14 +1,40 @@
 import numpy as np
 import skimage as sk
 import skimage.io as skio
-from scipy.ndimage import shift
-from skimage.transform import rescale
+import time
+import math
 
 BORDER_SIZE = 30
 
 
+def sobel_magnitude(image):
+    Kx = np.array([[ 1,  0, -1],
+                   [ 2,  0, -2],
+                   [ 1,  0, -1]], dtype=np.float32)
+
+    Ky = np.array([[ 1,  2,  1],
+                   [ 0,  0,  0],
+                   [-1, -2, -1]], dtype=np.float32)
+
+    padded_image = np.pad(image, ((1,1),(1,1)), mode='reflect')
+
+    H, W = image.shape
+    gx = np.zeros((H, W), dtype=np.float32)
+    gy = np.zeros((H, W), dtype=np.float32)
+
+    for i in range(3):
+        for j in range(3):
+            patch = padded_image[i:i+H, j:j+W]
+            gx += Kx[i, j] * patch
+            gy += Ky[i, j] * patch
+    
+    return np.sqrt(gx*gx + gy*gy)
+
 # try displacement [-search_range, search_range] for each axis
 def simple_align(channel, reference, x_search_range=(-15, 15), y_search_range=(-15, 15)):
+    channel_sobel = sobel_magnitude(channel)
+    reference_sobel = sobel_magnitude(reference)
+
     H, W = reference.shape
     best_shift = (0, 0)
     minimal_mean_distance = np.inf
@@ -22,20 +48,34 @@ def simple_align(channel, reference, x_search_range=(-15, 15), y_search_range=(-
 
             if rx1 <= rx0 or ry1 <= ry0:
                 continue
-            if rx1 - rx0 <= 0.9 * channel.shape[0] or ry1 - ry0 <= 0.8 * channel.shape[1]:
-                continue
 
             cx0 = max(0, -dx)
             cy0 = max(0, -dy)
             cx1 = cx0 + (rx1 - rx0)
             cy1 = cy0 + (ry1 - ry0)
 
-            mean_distance = np.mean((channel[cx0:cx1, cy0:cy1] - reference[rx0:rx1, ry0:ry1]) ** 2)
+            a = channel_sobel[cx0:cx1, cy0:cy1]
+            b = reference_sobel[rx0:rx1, ry0:ry1]
+            diff = (a - b).reshape(-1)
+            ssd = float(np.dot(diff, diff))
+            mean_distance = ssd / diff.shape[0]
             if mean_distance < minimal_mean_distance:
                 minimal_mean_distance = mean_distance
                 best_shift = (dx, dy)
     
-    return best_shift, shift(channel, shift=(best_shift[0], best_shift[1]), order=1, mode='nearest', cval=0.0)
+    dx, dy = best_shift
+    aligned_channel = np.roll(channel, shift=(dx, dy), axis=(0, 1)).copy()
+    if dx > 0:
+        aligned_channel[:dx, :] = 0.0
+    elif dx < 0:
+        aligned_channel[dx:, :] = 0.0
+    
+    if dy > 0:
+        aligned_channel[:, :dy] = 0.0
+    elif dy < 0:
+        aligned_channel[:, dy:] = 0.0
+
+    return best_shift, aligned_channel
 
 def gaussian_kernel_1d(sigma=1.0):
     radius = int(3 * sigma)
@@ -63,7 +103,7 @@ def gaussian_1d_conv_reflect(image, k, axis):
 def gaussian_blur(image, sigma=1.0):
     k = gaussian_kernel_1d(sigma)
     blur_image = gaussian_1d_conv_reflect(image, k, axis = 0)
-    blur_image = gaussian_1d_conv_reflect(blur_image, k, axis = 0)
+    blur_image = gaussian_1d_conv_reflect(blur_image, k, axis = 1)
 
     return blur_image
 
@@ -78,16 +118,25 @@ def build_pyramid(image, num_levels, sigma=1.0):
 
     return image_pyramid
 
+def compute_num_levels(H, W, max_num_levels = 10):
+    num_levels = 1
+    while min(H, W) >= 60 and num_levels < max_num_levels:
+        num_levels += 1
+        H //= 2
+        W //= 2
+    
+    return num_levels
+
 # scale = 2
-def pyramid_align(channel, reference, local_shift_range=3, num_levels=7):
+def pyramid_align(channel, reference, local_shift_range=3):
+    num_levels = compute_num_levels(channel.shape[0], channel.shape[1])
+    coarse_range = 10
+
     channel_pyramid = build_pyramid(channel, num_levels)
     reference_pyramid = build_pyramid(reference, num_levels)
     current_shift = (0, 0)
     shifted_image = []
 
-    coarse_range = min(20, int(0.05 * min(channel.shape[0], channel.shape[1])))
-    print(f'coarse range {coarse_range} size {channel.shape}')
-    
     for level in range(num_levels - 1, -1, -1):
         scale = 0.5 ** level
         current_shift = (current_shift[0] * 2, current_shift[1]*2)
@@ -98,19 +147,24 @@ def pyramid_align(channel, reference, local_shift_range=3, num_levels=7):
         x_shift_range = (0, 0)
         y_shift_range = (0, 0)
         if level == num_levels - 1:
-            x_shift_range = (-int(coarse_range * scale), int(coarse_range * scale))
+            x_shift_range = (-math.ceil(coarse_range * scale), math.ceil(coarse_range * scale))
             y_shift_range = x_shift_range
         else:
             x_shift_range = (current_shift[0] - local_shift_range, current_shift[0] + local_shift_range)
             y_shift_range = (current_shift[1] - local_shift_range, current_shift[1] + local_shift_range)
-            
+
+        # print(f"x_shift_range {x_shift_range} y_shift_range {y_shift_range} current_shift {current_shift}")
+ 
         best_shift, shifted_image = simple_align(channel_downsampled, reference_downsampled, x_shift_range, y_shift_range)
 
         current_shift = best_shift
+        # print(f"best shit {best_shift}")
+
 
     return current_shift, shifted_image
 
 def process_image(input_path, output_path, method):
+    start = time.time()
     print(f"Processing {input_path} with {method}... Align to blue channel...")
     image = skio.imread(input_path)
     image = sk.img_as_float(image)
@@ -138,7 +192,9 @@ def process_image(input_path, output_path, method):
     im_out_uint8 = (im_out * 255).astype(np.uint8)
     
     skio.imsave(output_path, im_out_uint8)
-    print(f"Image saved successfully as {output_path}")
+
+    end = time.time()
+    print(f"Image saved successfully as {output_path}. Runtime: {end-start:.3f} seconds\n-------------------------------")
     
 
 # simple_align_image_files = ['coms4732_hw1_data/cathedral.jpg', 'coms4732_hw1_data/monastery.jpg', 'coms4732_hw1_data/tobolsk.jpg']
@@ -151,20 +207,20 @@ def process_image(input_path, output_path, method):
 #     process_image(align_image_file, output_path, 'simple_alignment')
 
 pyramid_align_image_files = [
-    # 'coms4732_hw1_data/cathedral.jpg',
-    # 'coms4732_hw1_data/monastery.jpg',
-    # 'coms4732_hw1_data/tobolsk.jpg',
-    # 'coms4732_hw1_data/church.tif',
-    # 'coms4732_hw1_data/emir.tif',
+    'coms4732_hw1_data/cathedral.jpg',
+    'coms4732_hw1_data/monastery.jpg',
+    'coms4732_hw1_data/tobolsk.jpg',
+    'coms4732_hw1_data/church.tif',
+    'coms4732_hw1_data/emir.tif',
     'coms4732_hw1_data/harvesters.tif',
-    # 'coms4732_hw1_data/icon.tif',
-    # 'coms4732_hw1_data/italil.tif',
-    # 'coms4732_hw1_data/lastochikino.tif',
-    # 'coms4732_hw1_data/lugano.tif',
-    # 'coms4732_hw1_data/melons.tif',
-    # 'coms4732_hw1_data/self_portrait.tif',
-    # 'coms4732_hw1_data/siren.tif',
-    # 'coms4732_hw1_data/three_generations.tif'
+    'coms4732_hw1_data/icon.tif',
+    'coms4732_hw1_data/italil.tif',
+    'coms4732_hw1_data/lastochikino.tif',
+    'coms4732_hw1_data/lugano.tif',
+    'coms4732_hw1_data/melons.tif',
+    'coms4732_hw1_data/self_portrait.tif',
+    'coms4732_hw1_data/siren.tif',
+    'coms4732_hw1_data/three_generations.tif'
 ]
 
 for align_image_file in pyramid_align_image_files:
