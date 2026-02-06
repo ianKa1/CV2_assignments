@@ -37,8 +37,51 @@ def simple_align(channel, reference, x_search_range=(-15, 15), y_search_range=(-
     
     return best_shift, shift(channel, shift=(best_shift[0], best_shift[1]), order=1, mode='nearest', cval=0.0)
 
+def gaussian_kernel_1d(sigma=1.0):
+    radius = int(3 * sigma)
+    x = np.arange(-radius, radius + 1)
+    k = np.exp(-(x * x) / (2 * sigma * sigma))
+    k /= k.sum()
+    return k
+
+def gaussian_1d_conv_reflect(image, k, axis):
+    pad_size = len(k) // 2
+    pad = [(0, 0), (0, 0)]
+    pad[axis] = (pad_size, pad_size)
+    padded_image = np.pad(image, pad, mode = "reflect")
+
+    conv_image = np.zeros_like(image, dtype = np.float32)
+    if axis == 0:
+        for i, w in enumerate(k):
+            conv_image += w * padded_image[i:i+image.shape[0], :]
+    else:
+        for i, w in enumerate(k):
+            conv_image += w * padded_image[:, i:i+image.shape[1]]
+    
+    return conv_image
+
+def gaussian_blur(image, sigma=1.0):
+    k = gaussian_kernel_1d(sigma)
+    blur_image = gaussian_1d_conv_reflect(image, k, axis = 0)
+    blur_image = gaussian_1d_conv_reflect(blur_image, k, axis = 0)
+
+    return blur_image
+
+def build_pyramid(image, num_levels, sigma=1.0):
+    image_pyramid = [image]
+    cur_image = image
+
+    for level in range(num_levels - 1):
+        blur_image = gaussian_blur(cur_image, sigma=sigma)
+        cur_image = blur_image[::2, ::2]
+        image_pyramid.append(cur_image)
+
+    return image_pyramid
+
 # scale = 2
 def pyramid_align(channel, reference, local_shift_range=3, num_levels=7):
+    channel_pyramid = build_pyramid(channel, num_levels)
+    reference_pyramid = build_pyramid(reference, num_levels)
     current_shift = (0, 0)
     shifted_image = []
 
@@ -48,12 +91,9 @@ def pyramid_align(channel, reference, local_shift_range=3, num_levels=7):
     for level in range(num_levels - 1, -1, -1):
         scale = 0.5 ** level
         current_shift = (current_shift[0] * 2, current_shift[1]*2)
-        if scale < 1.0:
-            channel_downsampled = rescale(channel, scale, anti_aliasing=True, preserve_range=True)
-            reference_downsampled = rescale(reference, scale, anti_aliasing=True, preserve_range=True)
-        else:
-            channel_downsampled = channel
-            reference_downsampled = reference
+
+        channel_downsampled = channel_pyramid[level]
+        reference_downsampled = reference_pyramid[level]
         
         x_shift_range = (0, 0)
         y_shift_range = (0, 0)
@@ -111,11 +151,11 @@ def process_image(input_path, output_path, method):
 #     process_image(align_image_file, output_path, 'simple_alignment')
 
 pyramid_align_image_files = [
-    'coms4732_hw1_data/cathedral.jpg',
-    'coms4732_hw1_data/monastery.jpg',
-    'coms4732_hw1_data/tobolsk.jpg',
-    'coms4732_hw1_data/church.tif',
-    'coms4732_hw1_data/emir.tif',
+    # 'coms4732_hw1_data/cathedral.jpg',
+    # 'coms4732_hw1_data/monastery.jpg',
+    # 'coms4732_hw1_data/tobolsk.jpg',
+    # 'coms4732_hw1_data/church.tif',
+    # 'coms4732_hw1_data/emir.tif',
     'coms4732_hw1_data/harvesters.tif',
     # 'coms4732_hw1_data/icon.tif',
     # 'coms4732_hw1_data/italil.tif',
