@@ -8,12 +8,12 @@ BORDER_SIZE = 30
 
 
 # try displacement [-search_range, search_range] for each axis
-def simple_align(channel, reference, search_range=[-15, 15]):
+def simple_align(channel, reference, x_search_range=(-15, 15), y_search_range=(-15, 15)):
     H, W = reference.shape
     best_shift = (0, 0)
     minimal_mean_distance = np.inf
-    for dx in range(search_range[0], search_range[1] + 1):
-        for dy in range(search_range[0], search_range[1] + 1):
+    for dx in range(x_search_range[0], x_search_range[1] + 1):
+        for dy in range(y_search_range[0], y_search_range[1] + 1):
             # channel shifted by (dx, dy) - reference
             rx0 = max(0, dx)
             ry0 = max(0, dy)
@@ -36,10 +36,13 @@ def simple_align(channel, reference, search_range=[-15, 15]):
     return best_shift, shift(channel, shift=(best_shift[0], best_shift[1]), order=1, mode='nearest', cval=0.0)
 
 # scale = 2
-def pyramid_align(channel, reference, search_range=15, border_size=BORDER_SIZE, num_levels=3):
+def pyramid_align(channel, reference, search_range=15, local_shift_range=3, num_levels=5):
     current_shift = (0, 0)
+    shifted_image = []
+    
     for level in range(num_levels - 1, -1, -1):
         scale = 0.5 ** level
+        current_shift = (current_shift[0] * 2, current_shift[1]*2)
         if scale < 1.0:
             channel_downsampled = rescale(channel, scale, anti_aliasing=True, preserve_range=True)
             reference_downsampled = rescale(reference, scale, anti_aliasing=True, preserve_range=True)
@@ -47,15 +50,24 @@ def pyramid_align(channel, reference, search_range=15, border_size=BORDER_SIZE, 
             channel_downsampled = channel
             reference_downsampled = reference
         
-        
+        x_shift_range = (0, 0)
+        y_shift_range = (0, 0)
+        if level == num_levels - 1:
+            x_shift_range = (-int(search_range * scale), int(search_range * scale))
+            y_shift_range = x_shift_range
+        else:
+            x_shift_range = (current_shift[0] - local_shift_range, current_shift[0] + local_shift_range)
+            y_shift_range = (current_shift[1] - local_shift_range, current_shift[1] + local_shift_range)
+            
+        best_shift, shifted_image = simple_align(channel_downsampled, reference_downsampled, x_shift_range, y_shift_range)
 
+        current_shift = best_shift
 
+    return current_shift, shifted_image
 
-simple_align_image_files = ['coms4732_hw1_data/cathedral.jpg', 'coms4732_hw1_data/monastery.jpg', 'coms4732_hw1_data/tobolsk.jpg']
-
-for simple_align_image_file in simple_align_image_files:
-    print(f"Processing {simple_align_image_file} with simple alignment...\n Align to blue channel...")
-    image = skio.imread(simple_align_image_file)
+def process_image(input_path, output_path, method):
+    print(f"Processing {input_path} with {method}... Align to blue channel...")
+    image = skio.imread(input_path)
     image = sk.img_as_float(image)
 
     height = np.floor(image.shape[0] / 3.0).astype(int)
@@ -67,16 +79,54 @@ for simple_align_image_file in simple_align_image_files:
     g = g[BORDER_SIZE:-BORDER_SIZE, BORDER_SIZE:-BORDER_SIZE]
     r = r[BORDER_SIZE:-BORDER_SIZE, BORDER_SIZE:-BORDER_SIZE]
     b = b[BORDER_SIZE:-BORDER_SIZE, BORDER_SIZE:-BORDER_SIZE]
-
-    g_shift, g_aligned_image = simple_align(g, b)
-    r_shift, r_aligned_image = simple_align(r, b)
+    if method == 'pyramid_alignment':
+        g_shift, g_aligned_image = pyramid_align(g, b)
+        r_shift, r_aligned_image = pyramid_align(r, b)
+    else:
+        if method == 'simple_alignment':
+            g_shift, g_aligned_image = simple_align(g, b)
+            r_shift, r_aligned_image = simple_align(r, b)
 
     print(f"Green Channel Shift: {g_shift}, Red Channel Shift: {r_shift}")
     im_out = np.dstack([r_aligned_image, g_aligned_image, b])
     im_out = np.clip(im_out, 0, 1)
     im_out_uint8 = (im_out * 255).astype(np.uint8)
-
-    output_name = simple_align_image_file.split('/')[-1].split('.')[0] + '_simple_aligned.jpg'
     
-    skio.imsave(output_name, im_out_uint8)
-    print(f"Image saved successfully as {output_name}")
+    skio.imsave(output_path, im_out_uint8)
+    print(f"Image saved successfully as {output_path}")
+    
+
+simple_align_image_files = ['coms4732_hw1_data/cathedral.jpg', 'coms4732_hw1_data/monastery.jpg', 'coms4732_hw1_data/tobolsk.jpg']
+# pyramid_align_image_files = ['coms4732_hw1_data/cathedral.jpg', 'coms4732_hw1_data/monastery.jpg', 'coms4732_hw1_data/tobolsk.jpg']
+
+# for align_image_file in simple_align_image_files:
+for align_image_file in simple_align_image_files:
+    print(f"Processing {align_image_file} with simple alignment... Align to blue channel...")
+
+    output_path = align_image_file.split('/')[-1].split('.')[0] + '_simple_aligned.jpg'
+    
+    process_image(align_image_file, output_path, 'simple_alignment')
+
+pyramid_align_image_files = [
+    'coms4732_hw1_data/cathedral.jpg',
+    'coms4732_hw1_data/church.tif',
+    'coms4732_hw1_data/emir.tif',
+    'coms4732_hw1_data/harvesters.tif',
+    'coms4732_hw1_data/icon.tif',
+    'coms4732_hw1_data/italil.tif',
+    'coms4732_hw1_data/lastochikino.tif',
+    'coms4732_hw1_data/lugano.tif',
+    'coms4732_hw1_data/melons.tif',
+    'coms4732_hw1_data/monastery.jpg',
+    'coms4732_hw1_data/self_portrait.tif',
+    'coms4732_hw1_data/siren.tif',
+    'coms4732_hw1_data/three_generations.tif',
+    'coms4732_hw1_data/tobolsk.jpg'
+]
+
+for align_image_file in pyramid_align_image_files:
+    print(f"Processing {align_image_file} with pyramid alignment... Align to blue channel...")
+
+    output_path = align_image_file.split('/')[-1].split('.')[0] + '_pyramid_aligned.jpg'
+    
+    process_image(align_image_file, output_path, 'pyramid_alignment')
