@@ -4,8 +4,6 @@ import skimage.io as skio
 import time
 import math
 
-BORDER_SIZE = 30
-
 
 def sobel_magnitude(image):
     Kx = np.array([[ 1,  0, -1],
@@ -128,9 +126,9 @@ def compute_num_levels(H, W, max_num_levels = 10):
     return num_levels
 
 # scale = 2
-def pyramid_align(channel, reference, local_shift_range=3):
+def pyramid_align(channel, reference, local_shift_range=5):
     num_levels = compute_num_levels(channel.shape[0], channel.shape[1])
-    coarse_range = 10
+    coarse_range = 30
 
     channel_pyramid = build_pyramid(channel, num_levels)
     reference_pyramid = build_pyramid(reference, num_levels)
@@ -174,6 +172,8 @@ def process_image(input_path, output_path, method):
     b = image[:height]
     g = image[height: 2*height]
     r = image[2*height: 3*height]
+    border_frac = 0.06
+    BORDER_SIZE = int(image.shape[0] * border_frac / 2)
     # remove borders by constant size
     g = g[BORDER_SIZE:-BORDER_SIZE, BORDER_SIZE:-BORDER_SIZE]
     r = r[BORDER_SIZE:-BORDER_SIZE, BORDER_SIZE:-BORDER_SIZE]
