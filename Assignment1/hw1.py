@@ -22,6 +22,8 @@ def simple_align(channel, reference, x_search_range=(-15, 15), y_search_range=(-
 
             if rx1 <= rx0 or ry1 <= ry0:
                 continue
+            if rx1 - rx0 <= 0.9 * channel.shape[0] or ry1 - ry0 <= 0.8 * channel.shape[1]:
+                continue
 
             cx0 = max(0, -dx)
             cy0 = max(0, -dy)
@@ -36,9 +38,12 @@ def simple_align(channel, reference, x_search_range=(-15, 15), y_search_range=(-
     return best_shift, shift(channel, shift=(best_shift[0], best_shift[1]), order=1, mode='nearest', cval=0.0)
 
 # scale = 2
-def pyramid_align(channel, reference, search_range=15, local_shift_range=3, num_levels=5):
+def pyramid_align(channel, reference, local_shift_range=3, num_levels=7):
     current_shift = (0, 0)
     shifted_image = []
+
+    coarse_range = min(20, int(0.05 * min(channel.shape[0], channel.shape[1])))
+    print(f'coarse range {coarse_range} size {channel.shape}')
     
     for level in range(num_levels - 1, -1, -1):
         scale = 0.5 ** level
@@ -53,7 +58,7 @@ def pyramid_align(channel, reference, search_range=15, local_shift_range=3, num_
         x_shift_range = (0, 0)
         y_shift_range = (0, 0)
         if level == num_levels - 1:
-            x_shift_range = (-int(search_range * scale), int(search_range * scale))
+            x_shift_range = (-int(coarse_range * scale), int(coarse_range * scale))
             y_shift_range = x_shift_range
         else:
             x_shift_range = (current_shift[0] - local_shift_range, current_shift[0] + local_shift_range)
@@ -96,37 +101,33 @@ def process_image(input_path, output_path, method):
     print(f"Image saved successfully as {output_path}")
     
 
-simple_align_image_files = ['coms4732_hw1_data/cathedral.jpg', 'coms4732_hw1_data/monastery.jpg', 'coms4732_hw1_data/tobolsk.jpg']
-# pyramid_align_image_files = ['coms4732_hw1_data/cathedral.jpg', 'coms4732_hw1_data/monastery.jpg', 'coms4732_hw1_data/tobolsk.jpg']
+# simple_align_image_files = ['coms4732_hw1_data/cathedral.jpg', 'coms4732_hw1_data/monastery.jpg', 'coms4732_hw1_data/tobolsk.jpg']
+# # pyramid_align_image_files = ['coms4732_hw1_data/cathedral.jpg', 'coms4732_hw1_data/monastery.jpg', 'coms4732_hw1_data/tobolsk.jpg']
 
+# # for align_image_file in simple_align_image_files:
 # for align_image_file in simple_align_image_files:
-for align_image_file in simple_align_image_files:
-    print(f"Processing {align_image_file} with simple alignment... Align to blue channel...")
-
-    output_path = align_image_file.split('/')[-1].split('.')[0] + '_simple_aligned.jpg'
+#     output_path = 'output/' + align_image_file.split('/')[-1].split('.')[0] + '_simple_aligned.jpg'
     
-    process_image(align_image_file, output_path, 'simple_alignment')
+#     process_image(align_image_file, output_path, 'simple_alignment')
 
 pyramid_align_image_files = [
     'coms4732_hw1_data/cathedral.jpg',
+    'coms4732_hw1_data/monastery.jpg',
+    'coms4732_hw1_data/tobolsk.jpg',
     'coms4732_hw1_data/church.tif',
     'coms4732_hw1_data/emir.tif',
     'coms4732_hw1_data/harvesters.tif',
-    'coms4732_hw1_data/icon.tif',
-    'coms4732_hw1_data/italil.tif',
-    'coms4732_hw1_data/lastochikino.tif',
-    'coms4732_hw1_data/lugano.tif',
-    'coms4732_hw1_data/melons.tif',
-    'coms4732_hw1_data/monastery.jpg',
-    'coms4732_hw1_data/self_portrait.tif',
-    'coms4732_hw1_data/siren.tif',
-    'coms4732_hw1_data/three_generations.tif',
-    'coms4732_hw1_data/tobolsk.jpg'
+    # 'coms4732_hw1_data/icon.tif',
+    # 'coms4732_hw1_data/italil.tif',
+    # 'coms4732_hw1_data/lastochikino.tif',
+    # 'coms4732_hw1_data/lugano.tif',
+    # 'coms4732_hw1_data/melons.tif',
+    # 'coms4732_hw1_data/self_portrait.tif',
+    # 'coms4732_hw1_data/siren.tif',
+    # 'coms4732_hw1_data/three_generations.tif'
 ]
 
 for align_image_file in pyramid_align_image_files:
-    print(f"Processing {align_image_file} with pyramid alignment... Align to blue channel...")
-
-    output_path = align_image_file.split('/')[-1].split('.')[0] + '_pyramid_aligned.jpg'
+    output_path = 'output/' + align_image_file.split('/')[-1].split('.')[0] + '_pyramid_aligned.jpg'
     
     process_image(align_image_file, output_path, 'pyramid_alignment')
