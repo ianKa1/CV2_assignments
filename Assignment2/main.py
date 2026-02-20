@@ -7,7 +7,7 @@ from skimage.transform import resize
 import os
 
 
-IMAGE_NAME = 'mac'
+IMAGE_NAME = 'tissue'
 
 def convert_to_grayscale(image):
     return image.convert('L')
