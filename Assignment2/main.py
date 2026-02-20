@@ -170,11 +170,82 @@ def match_features_nndr(features1, features2, plot_hist=True):
         plt.axvline(THRESHOLD, color='r', linestyle='--', linewidth=2)
         plt.xlabel('NNDR (d1 / d2)')
         plt.ylabel('Count')
-        plt.title('NNDR Histogram')
+        plt.title(f'{IMAGE_NAME} NNDR Histogram (THRESHOLD = {THRESHOLD}) using SSD')
         plt.savefig(f'results/{IMAGE_NAME}/{IMAGE_NAME}_nndr_histogram.jpg')
         plt.close()
 
-    return matches
+    # Return matches along with nn1_idx, nn2_idx, and ratios for visualization
+    return matches, nn1_idx, nn2_idx, ratios
+
+def visualize_top_matches(image1, image2, coords1, coords2, nn1_idx, nn2_idx, ratios, output_path, top_k=5, patch_size=40):
+    """
+    Visualize the top K best feature matches showing img1 feature, 1NN from img2, and 2NN from img2.
+
+    Args:
+        image1, image2: grayscale numpy arrays
+        coords1, coords2: corner coordinates, shape (2, n)
+        nn1_idx: indices of 1st nearest neighbors in img2 for each feature in img1
+        nn2_idx: indices of 2nd nearest neighbors in img2 for each feature in img1
+        ratios: NNDR ratios for each feature in img1
+        output_path: path to save visualization
+        top_k: number of best matches to visualize (default: 5)
+        patch_size: size of patch to extract (default: 40)
+    """
+    # Find top K matches with smallest ratios
+    best_indices = np.argsort(ratios)[:top_k]
+
+    half = patch_size // 2
+    H1, W1 = image1.shape
+    H2, W2 = image2.shape
+
+    # Create figure with top_k rows and 3 columns
+    fig, axes = plt.subplots(top_k, 3, figsize=(9, 3 * top_k))
+    if top_k == 1:
+        axes = axes.reshape(1, -1)
+
+    for row_idx, feat_idx in enumerate(best_indices):
+        # Get coordinates for img1 feature
+        y1, x1 = int(coords1[0, feat_idx]), int(coords1[1, feat_idx])
+
+        # Get 1NN and 2NN from img2
+        nn1_feat_idx = nn1_idx[feat_idx]
+        nn2_feat_idx = nn2_idx[feat_idx]
+
+        y2_nn1, x2_nn1 = int(coords2[0, nn1_feat_idx]), int(coords2[1, nn1_feat_idx])
+        y2_nn2, x2_nn2 = int(coords2[0, nn2_feat_idx]), int(coords2[1, nn2_feat_idx])
+
+        # Extract patches (with boundary checking)
+        # Patch from img1
+        y1_start, y1_end = max(0, y1-half), min(H1, y1+half)
+        x1_start, x1_end = max(0, x1-half), min(W1, x1+half)
+        patch1 = image1[y1_start:y1_end, x1_start:x1_end]
+
+        # 1NN patch from img2
+        y2_nn1_start, y2_nn1_end = max(0, y2_nn1-half), min(H2, y2_nn1+half)
+        x2_nn1_start, x2_nn1_end = max(0, x2_nn1-half), min(W2, x2_nn1+half)
+        patch2_nn1 = image2[y2_nn1_start:y2_nn1_end, x2_nn1_start:x2_nn1_end]
+
+        # 2NN patch from img2
+        y2_nn2_start, y2_nn2_end = max(0, y2_nn2-half), min(H2, y2_nn2+half)
+        x2_nn2_start, x2_nn2_end = max(0, x2_nn2-half), min(W2, x2_nn2+half)
+        patch2_nn2 = image2[y2_nn2_start:y2_nn2_end, x2_nn2_start:x2_nn2_end]
+
+        # Display patches
+        axes[row_idx, 0].imshow(patch1, cmap='gray')
+        axes[row_idx, 0].set_title(f'Img1 Feature {row_idx+1}')
+        axes[row_idx, 0].axis('off')
+
+        axes[row_idx, 1].imshow(patch2_nn1, cmap='gray')
+        axes[row_idx, 1].set_title(f'1NN (NNDR={ratios[feat_idx]:.3f})')
+        axes[row_idx, 1].axis('off')
+
+        axes[row_idx, 2].imshow(patch2_nn2, cmap='gray')
+        axes[row_idx, 2].set_title(f'2NN')
+        axes[row_idx, 2].axis('off')
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches='tight')
+    plt.close()
 
 os.makedirs(f"results/{IMAGE_NAME}", exist_ok=True)
 
@@ -209,10 +280,14 @@ features2, valid_coords2 = get_corner_features(image2_gray, coords_nms2)
 print(features1.shape, features2.shape)
 
 # Step 4: Match features
-matches = match_features_nndr(features1, features2)
+matches, nn1_idx, nn2_idx, ratios = match_features_nndr(features1, features2)
 print(matches.shape)
 
 # Step 5: Visualize matches
 visualize_matches(image1, image2, valid_coords1, valid_coords2, matches, f'results/{IMAGE_NAME}/{IMAGE_NAME}_matches_visualization.jpg')
+
+# Step 6: Visualize top 5 best matches
+visualize_top_matches(image1_gray, image2_gray, valid_coords1, valid_coords2, nn1_idx, nn2_idx, ratios,
+                      f'results/{IMAGE_NAME}/{IMAGE_NAME}_top5_matches.jpg', top_k=5)
 
 
