@@ -84,7 +84,7 @@ class Config:
     sift_sigma: float = 1.6  # Initial Gaussian sigma for image smoothing
 
     # Step 3 Feature matching
-    feature_matching_ratio_threshold: float = 0.9 # TODO: provide NNDR ratio
+    feature_matching_ratio_threshold: float = 0.75 # TODO: provide NNDR ratio
 
     # Step 4 RANSAC
     ransac_s: int = 8  # Minimum 8 points for essential matrix
