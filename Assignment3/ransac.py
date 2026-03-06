@@ -138,7 +138,27 @@ def RANSAC(
             # Don't forget to append to inlier_counts and best_so_far
             # each iteration (needed for the convergence plot).
             # ============================================================
-            return # fix me plz
+            sample_p1 = img1_pts[idx]
+            sample_p2 = img2_pts[idx]
+            E = compute_E(sample_p1, sample_p2, K)
+            R, t, points_3d = recover_pose(E, sample_p1, sample_p2, K)
+            if R is None or t is None or points_3d is None:
+                raise np.linalg.LinAlgError
+            
+            distance = sampson_distance(E, img1_pts, img2_pts, K_inv)
+            inliers_mask = distance < epsilon
+            min_distance = min(distance)
+            num_inliers = np.count_nonzero(inliers_mask)
+            # print(f"min distance {min_distance} num_inliers {num_inliers}")
+
+            if num_inliers > best_num_inliers:
+                best_num_inliers = num_inliers
+                best_E = E
+                best_inliers_mask = inliers_mask
+
+            inlier_counts.append(num_inliers)
+            best_so_far.append(best_num_inliers)
+
             # ============================================================
 
         except (np.linalg.LinAlgError, AssertionError):
@@ -159,7 +179,11 @@ def RANSAC(
         # YOUR CODE HERE: Re-estimate E from the inlier set,
         # then recover the final (R, t) via recover_pose()
         # ============================================================
-        return # fix me plz
+        inliers_pts1 = img1_pts[best_inliers_mask]
+        inliers_pts2 = img2_pts[best_inliers_mask]
+
+        best_E = compute_E(inliers_pts1, inliers_pts2, K)
+        best_R, best_t, best_points_3d = recover_pose(best_E, inliers_pts1, inliers_pts2, K)
         # ============================================================
     else:
         print("WARNING: Not enough inliers for post-loop refinement!")
@@ -195,4 +219,4 @@ def RANSAC(
                                 improvement_iters, improvement_vals,
                                 best_num_inliers, epsilon, output_dir)
 
-    return best_R, best_t, best_inliers_mask, best_E
+    return best_R, best_t, best_inliers_mask, best_E, best_points_3d

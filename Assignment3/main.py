@@ -62,11 +62,11 @@ def seed_everything(seed: int):
 class Config:
     """Configuration for the two-view stereo reconstruction pipeline."""
     # Image paths
-    img1_path: str = None # TODO: provide
-    img2_path: str = None # TODO: provide
+    img1_path: str = "input_images/img1_1280x960.jpeg" # TODO: provide
+    img2_path: str = "input_images/img2_1280x960.jpeg" # TODO: provide
     output_dir_path: str = "outputs"
 
-    random_seed: int = None # TODO: provide
+    random_seed: int = 42 # TODO: provide
 
     # Step 1 camera params
     # (iPhone 15 Pro 1x, 35mm-derived sensor dims for square pixels)
@@ -76,7 +76,7 @@ class Config:
 
     # Step 2 SIFT parameters
     sift_edge_discard: int = 20
-    sift_max_features: int = None # TODO: provide num SIFT features used
+    sift_max_features: int = 7000 # TODO: provide num SIFT features used
     # Note: you shouldn't need to touch these sift params below. If you do, report what you changed.
     sift_contrast_threshold: float = 0.04  # Contrast threshold (lower = more features, but less stable)
     sift_edge_threshold: float = 10  # Edge threshold (higher = more features, including edges)
@@ -84,12 +84,12 @@ class Config:
     sift_sigma: float = 1.6  # Initial Gaussian sigma for image smoothing
 
     # Step 3 Feature matching
-    feature_matching_ratio_threshold: float = None # TODO: provide NNDR ratio
+    feature_matching_ratio_threshold: float = 0.9 # TODO: provide NNDR ratio
 
     # Step 4 RANSAC
     ransac_s: int = 8  # Minimum 8 points for essential matrix
-    ransac_epsilon = None # TODO: provide distance threshold
-    ransac_num_iters: int = None # TODO: provide number of ransac iterations
+    ransac_epsilon = 5e-4 # TODO: provide distance threshold
+    ransac_num_iters: int = 1000 # TODO: provide number of ransac iterations
 
     # Step 5 Triangulation filtering
     # Note: you shouldn't need to touch these triangulation params below. If you do, report what you changed.
@@ -125,8 +125,8 @@ def main(cfg: Config):
         d for d in os.listdir(base_output_dir)
         if os.path.isdir(os.path.join(base_output_dir, d)) and d.startswith(run_str)
     ])
-    timestamp = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-    cfg.output_dir_path = f"{base_output_dir}/{run_str}_{run_attempt_num}_{timestamp}"
+    
+    cfg.output_dir_path = f"{base_output_dir}/{run_str}_{run_attempt_num}"
     os.makedirs(cfg.output_dir_path, exist_ok=True)
 
     # Save configuration

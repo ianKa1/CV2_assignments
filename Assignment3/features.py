@@ -75,11 +75,14 @@ def match_features(
         nndr_proportions: list of d1/d2 ratios for all KNN pairs (for histogram)
     """
     bf = cv2.BFMatcher(cv2.NORM_L2)
+    print(f"descs1 :{descriptors1.shape} descs2: {descriptors2.shape}")
     knn_matches = bf.knnMatch(
         descriptors1.astype(np.float32),
         descriptors2.astype(np.float32),
         k=2,
     )
+
+    print(ratio_threshold)
 
     # NNDR ratio test
     good = [m for m, n in knn_matches
