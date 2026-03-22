@@ -1,8 +1,9 @@
 import torch
 import torch.nn as nn
+import tyro
 
 from src.dataset_3d import load_data, RaysData
-from src.rendering import sample_along_rays
+from src.rendering import sample_along_rays, predict_rgbs
 
 from torch.utils.data import Dataset, DataLoader
 from dataclasses import dataclass
@@ -13,15 +14,15 @@ def make_infinite(dataloader):
             yield batch
 
 # x -> [batch, d]
-def sinusoidal_position_encoding(x, L, device=None):
-    batch_size, d = x.shape
-    arr = torch.arange(L, device=device) # [L]
-    arr = 2**arr * torch.pi * x[:, :, None] # [batch, d, L]
+def sinusoidal_position_encoding(x, L):
+    arr = torch.arange(L, device=x.device, dtype=x.dtype) # [L]
+    arr = 2**arr * torch.pi * x[..., None] # [batch, d, L]
     sins = torch.sin(arr) 
     coss = torch.cos(arr)
-    pe = torch.stack([sins[:, :, :], coss[:, :, :]], dim=-1)
-    pe = pe.view(batch_size, d, -1)
-    pe = torch.cat([x[:, :, None], pe], dim=-1)
+    
+    pe = torch.cat([sins, coss], dim=-1)
+    pe = pe.reshape(*x.shape[:-1], -1)
+    pe = torch.cat([x, pe], dim=-1)
 
     return pe
 
@@ -60,17 +61,18 @@ class NerfModel(torch.nn.Module):
 
         self.rgb_output_pre = nn.Linear(hidden_size, hidden_size)
         self.rgb_output = nn.Sequential(
-            nn.Linear(hidden_size + 6*L+3, hidden_size // 2)
+            nn.Linear(hidden_size + 6*L+3, hidden_size // 2),
             nn.ReLU(),
             nn.Linear(hidden_size // 2, 3),
             nn.Sigmoid()
         )
 
-    # x -> [batch, 3] rd -> [batch, 3]
+    # x -> [num_pixels, num_samples, 3] rd -> [num_pixels, 3]
+    # density -> [num_pixels, num_samples] rgb->[num_pixels, num_samples, 3]
     def forward(self, x, rd):
-        batch_size = x.shape[0]
-        pe_x = sinusoidal_position_encoding(x, self.L).view(batch_size) # [batch_size, 6L+3]
-        pe_rd = sinusoidal_position_encoding(rd, self.L).view(batch_size)
+        batch_size, num_samples = x.shape[:-1]
+        pe_x = sinusoidal_position_encoding(x, self.L)
+        pe_rd = sinusoidal_position_encoding(rd, self.L)
 
         hidden_half_net = self.half_net0(pe_x)
         input_half_net = torch.cat([hidden_half_net, pe_x], dim=-1)
@@ -79,6 +81,7 @@ class NerfModel(torch.nn.Module):
         density = self.density_output(hidden)
 
         hidden_rgb = self.rgb_output_pre(hidden)
+        pe_rd = pe_rd[:, None, :].repeat(1, num_samples, 1)
         input_rgb_block = torch.cat([hidden_rgb, pe_rd], dim=-1)
         rgb = self.rgb_output(input_rgb_block)
 
@@ -86,17 +89,56 @@ class NerfModel(torch.nn.Module):
 
 
 if __name__ == '__main__':
+    cfg = tyro.cli(Config)
 
-    # images_train, c2ws_train, images_val, c2ws_val, c2ws_test, K = load_data(data_path=cfg.data_path)
+    images_train, c2ws_train, images_val, c2ws_val, c2ws_test, K = load_data(data_path=cfg.data_path)
 
-    # H, W = images_train.shape[1], images_train.shape[2]
-    # dataset = RaysData(images_train.to(cfg.device), K.to(cfg.device), c2ws_train.to(cfg.device), device=cfg.device)
+    H, W = images_train.shape[1], images_train.shape[2]
+    dataset = RaysData(images_train.to(cfg.device), K.to(cfg.device), c2ws_train.to(cfg.device), device=cfg.device)
 
-    # dataloader = DataLoader(dataset, batch_size=16, shuffle=True, num_worker=0)
+    dataloader = DataLoader(dataset, batch_size=16, shuffle=True, num_workers=0)
 
-    # train_iter = make_infinite(dataloader)
+    nerf_model = NerfModel(device=cfg.device).to(cfg.device)
+    optimizer = torch.optim.Adam(nerf_model.parameters(), lr=1e-3)
+
+    train_iter = make_infinite(dataloader)
+    max_steps = 10000
     
-    # max_steps = 10000
-    
-    # for step in range(max_steps):
-    #     batch = next(train_iter)
+    nerf_model.train()
+    for step in range(max_steps):
+        batch = next(train_iter)
+        r_os = batch["ray_o"].to(cfg.device)
+        r_ds = batch["ray_d"].to(cfg.device)
+        gt_rgbs = batch["rgb"].to(cfg.device)
+        xs = sample_along_rays(r_os, r_ds, cfg.near, cfg.far, cfg.num_samples_along_ray, device=cfg.device).to(cfg.device)
+        pred_rgb = predict_rgbs(nerf_model, xs, r_ds, cfg.near, cfg.far, cfg.num_samples_along_ray)
+        
+        mse_loss = nn.functional.mse_loss(pred_rgb, gt_rgbs) 
+        loss = -10 * torch.log10(1.0 / (mse_loss + 1e-6))
+        
+        optimizer.zero_grad()
+        loss.back_ward()
+        optimizer.step()
+        
+        if step % 10 == 0:
+            print(f" steps: {step}/{max_step} mse_loss: {mse_loss} NSPR: {-loss}")
+        
+        if step % 100 == 0:
+            r_os = dataset.rays_o[0:H*W, 3]
+            r_ds = dataset.rays_d[0:H*W, 3]
+            gt_rgbs = dataset.gt_rgbs[0:H*W, 3]
+            
+            xs = sample_along_rays(r_os, r_ds, gt_rgbs, cfg.near, cfg.far, cfg.num_samples_along_ray, device=cfg.device)
+            with torch.no_grad():
+                pred_rgb = predict_rgbs(nerf_model, xs, r_ds, cfg.near, cfg.far, cfg.num_samples_along_ray)
+            pred_rgb = pred_rgb.view(H, W, 3).detach().cpu().numpy()
+            
+            pred_rgb = (pred_rgb * 255).astype('uint8')
+
+            # Create and save image
+            output_image = Image.fromarray(pred_rgb)
+            output_image.save(f"output_step{step}.png")
+        
+        
+        
+

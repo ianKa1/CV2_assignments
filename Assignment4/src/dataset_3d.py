@@ -269,7 +269,7 @@ class RaysData(Dataset):
 
         return self.rays_o[indices, :], self.rays_d[indices, :], self.gt_rgbs[indices, :]
 
-    def __gettime__(self, idx):
+    def __getitem__(self, idx):
         return {
             "ray_o": self.rays_o[idx],
             "ray_d": self.rays_d[idx],

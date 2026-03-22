@@ -3,7 +3,7 @@ import torch.nn as nn
 import numpy as np
 from src.dataset_3d import pixels_to_rays
 
-def batched_T_i(sigmas: torch.Tensor, delta: torch.Tensor, device: str = "cuda"):
+def batched_T_i(sigmas: torch.Tensor, delta: torch.Tensor, device: str = "cuda" if torch.cuda.is_available() else "mps"):
     start = torch.ones((sigmas.shape[0], 1, 1)).to(device)
 
     exp_factors = torch.exp(-1 * sigmas * delta).to(device)
@@ -18,7 +18,7 @@ def sample_along_rays(
     far: float,
     num_samples_along_ray: int,
     perturb: bool = True,
-    device: str = "cuda",
+    device: str = "cuda" if torch.cuda.is_available() else "mps",
 ):
     """Sample points along rays.
 
@@ -47,7 +47,7 @@ def volrend(
     near: float,
     far: float,
     num_samples_along_ray: int,
-    device: str = "cuda",
+    device: str = "cuda" if torch.cuda.is_available() else "mps",
 ):
     """Volume rendering along rays using the discrete approximation.
 
