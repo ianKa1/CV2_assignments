@@ -268,3 +268,10 @@ class RaysData(Dataset):
         indices = torch.randint(0, self.num_images * self.h * self.w, (num_rays,))
 
         return self.rays_o[indices, :], self.rays_d[indices, :], self.gt_rgbs[indices, :]
+
+    def __gettime__(self, idx):
+        return {
+            "ray_o": self.rays_o[idx],
+            "ray_d": self.rays_d[idx],
+            "rgb": self.gt_rgbs[idx]
+        }
