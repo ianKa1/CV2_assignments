@@ -23,22 +23,22 @@ def load_data(
 
 
     # Training images: [100, 200, 200, 3]
-    images_train = data["images_train"] / 255.0
+    images_train = torch.from_numpy(data["images_train"] / 255.0).float()
 
     # Cameras for the training images
     # (camera-to-world transformation matrix): [100, 4, 4]
-    c2ws_train = data["c2ws_train"]
+    c2ws_train = torch.from_numpy(data["c2ws_train"]).float()
 
     # Validation images:
-    images_val = data["images_val"] / 255.0
+    images_val = torch.from_numpy(data["images_val"] / 255.0).float()
 
     # Cameras for the validation images: [10, 4, 4]
     # (camera-to-world transformation matrix): [10, 200, 200, 3]
-    c2ws_val = data["c2ws_val"]
+    c2ws_val = torch.from_numpy(data["c2ws_val"]).float()
 
     # Test cameras for novel-view video rendering:
     # (camera-to-world transformation matrix): [60, 4, 4]
-    c2ws_test = data["c2ws_test"]
+    c2ws_test = torch.from_numpy(data["c2ws_test"]).float()
 
     # Camera focal length
     focal = data["focal"]  # float
@@ -47,6 +47,7 @@ def load_data(
     o_x = w / 2
     o_y = h / 2
     K = torch.as_tensor([[focal.item(), 0, o_x], [0, focal.item(), o_y], [0, 0, 1]])
+
 
     return images_train, c2ws_train, images_val, c2ws_val, c2ws_test, K
 
@@ -96,7 +97,7 @@ def pixels_to_rays(
         r_ds: torch.Tensor of shape (num_pixels, 3) representing the ray directions
     """
     K = K.to(device)
-    c2w = c2w.to(torch.float64).to(device)
+    c2w = c2w.to(torch.float32).to(device)
     uvs = uvs.to(device)
 
     if verbose:
@@ -115,8 +116,8 @@ def pixels_to_rays(
 
     # ray directions: R @ K_inv @ [u, v, 1] for each pixel, then normalize
     K_inv = torch.linalg.inv(K).to(device)
-    M = R @ K_inv.to(torch.float64)  # (3, 3) — combines rotation and unprojection
-    dirs = (M @ homog_uvs.to(torch.float64).T).T  # (num_pixels, 3)
+    M = R @ K_inv.to(torch.float32)  # (3, 3) — combines rotation and unprojection
+    dirs = (M @ homog_uvs.to(torch.float32).T).T  # (num_pixels, 3)
     r_ds = dirs / torch.linalg.norm(dirs, dim=1, keepdim=True)
 
     if verbose:
@@ -224,8 +225,12 @@ class RaysData(Dataset):
         # This is used in visualize_viser.py to verify that rays match the correct pixels:
         #   assert images[0, uvs[:, 1], uvs[:, 0]] == dataset.pixels[:]
         # Hint: torch.meshgrid with torch.arange(W) and torch.arange(H)
-        xs, ys = torch.meshgrid(torch.arange(self.w), torch.arange(self.h), indexing="ij")
-        uvs_single = torch.stack([xs, ys], dim=-1)
+        ys, xs = torch.meshgrid(
+            torch.arange(self.h),
+            torch.arange(self.w),
+            indexing="ij"
+        )
+        uvs_single = torch.stack([xs, ys], dim=-1).view(-1, 2)
         self.uvs = uvs_single.repeat(self.num_images, 1)
         self.rays_o = []
         self.rays_d = []
@@ -234,9 +239,9 @@ class RaysData(Dataset):
             self.rays_o.append(r_os_single)
             self.rays_d.append(r_ds_single)
 
-        self.rays_o = torch.tensor(self.rays_o)
-        self.rays_d = torch.tensor(self.rays_d)
-        self.gt_rgbs = self.images.view(-1, 3)
+        self.rays_o = torch.cat(self.rays_o, dim=0).to(device)
+        self.rays_d = torch.cat(self.rays_d, dim=0).to(device)
+        self.gt_rgbs = self.images.view(-1, 3).to(device)
 
     def __len__(self):
         """Return the total number of rays in the dataset.

@@ -35,10 +35,10 @@ def sample_along_rays(
         samples: torch.Tensor of shape (num_pixels, num_samples_along_ray, 3) representing
         the 3D positions of the samples along each ray
     """
-    t = torch.linspace(near, far, num_samples_along_ray)
+    t = torch.linspace(near, far, num_samples_along_ray).to(device)
     if perturb:
-        t = t + torch.rand(t.shape) * (far - near) / num_samples_along_ray
-    return r_os[:, None, :] + t * r_ds[:, None, :]
+        t = t + torch.rand_like(t) * (far - near) / num_samples_along_ray
+    return r_os[:, None, :] + t[None, :, None] * r_ds[:, None, :]
 
 
 def volrend(

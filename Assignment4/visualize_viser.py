@@ -12,10 +12,10 @@ from src.rendering import sample_along_rays
 @dataclass
 class Config:
     data_path: str = "data/lego_200x200.npz"
-    near: float = None
-    far: float = None
-    num_samples_along_ray: int = None
-    num_rays: int = None
+    near: float = 2.0
+    far: float = 6.0
+    num_samples_along_ray: int = 30
+    num_rays: int = 100
     device: str = "cuda" if torch.cuda.is_available() else "mps"
     port: int = 8080
 
@@ -24,8 +24,7 @@ def main(cfg: Config):
     images_train, c2ws_train, images_val, c2ws_val, c2ws_test, K = load_data(data_path=cfg.data_path)
 
     H, W = images_train.shape[1], images_train.shape[2]
-
-    dataset = RaysData(images_train.to(cfg.device), K.to(cfg.device), c2ws_train.to(cfg.device))
+    dataset = RaysData(images_train.to(cfg.device), K.to(cfg.device), c2ws_train.to(cfg.device), device=cfg.device)
 
     # Verify uvs aren't flipped
     uvs_start = 0
