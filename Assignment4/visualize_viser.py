@@ -16,7 +16,7 @@ class Config:
     far: float = None
     num_samples_along_ray: int = None
     num_rays: int = None
-    device: str = "cuda" if torch.cuda.is_available() else "cpu"
+    device: str = "cuda" if torch.cuda.is_available() else "mps"
     port: int = 8080
 
 

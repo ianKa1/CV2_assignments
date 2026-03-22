@@ -174,6 +174,7 @@ def images_to_rays(
         and [:, :, :, 3:] are ray directions
     """
     # TODO implement yourself
+    
     pass
 
 
@@ -223,9 +224,19 @@ class RaysData(Dataset):
         # This is used in visualize_viser.py to verify that rays match the correct pixels:
         #   assert images[0, uvs[:, 1], uvs[:, 0]] == dataset.pixels[:]
         # Hint: torch.meshgrid with torch.arange(W) and torch.arange(H)
+        xs, ys = torch.meshgrid(torch.arange(self.w), torch.arange(self.h), indexing="ij")
+        uvs_single = torch.stack([xs, ys], dim=-1)
+        self.uvs = uvs_single.repeat(self.num_images, 1)
+        self.rays_o = []
+        self.rays_d = []
+        for i in range(self.num_images):
+            r_os_single, r_ds_single = pixels_to_rays(self.K, self.c2ws[i], uvs_single, device=device)
+            self.rays_o.append(r_os_single)
+            self.rays_d.append(r_ds_single)
 
-        # TODO implement yourself
-        pass
+        self.rays_o = torch.tensor(self.rays_o)
+        self.rays_d = torch.tensor(self.rays_d)
+        self.gt_rgbs = self.images.view(-1, 3)
 
     def __len__(self):
         """Return the total number of rays in the dataset.
@@ -233,8 +244,7 @@ class RaysData(Dataset):
         Returns:
             int representing num_images * H * W
         """
-        # TODO implement yourself
-        pass
+        return self.num_images * self.h * self.w
 
     def sample_rays(self, num_rays: int):
         """Sample random rays from the dataset.
@@ -250,5 +260,6 @@ class RaysData(Dataset):
         Hints:
             You need to randomly sample the rays and pixels using num_rays
         """
-        # TODO implement yourself
-        return None, None, None
+        indices = torch.randint(0, self.num_images * self.h * self.w, (num_rays,))
+
+        return self.rays_o[indices, :], self.rays_d[indices, :], self.gt_rgbs[indices, :]
