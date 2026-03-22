@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import tyro
+from PIL import Image
 
 from src.dataset_3d import load_data, RaysData
 from src.rendering import sample_along_rays, predict_rgbs
@@ -85,7 +86,7 @@ class NerfModel(torch.nn.Module):
         input_rgb_block = torch.cat([hidden_rgb, pe_rd], dim=-1)
         rgb = self.rgb_output(input_rgb_block)
 
-        return density, rgb
+        return rgb, density
 
 
 if __name__ == '__main__':
@@ -96,10 +97,10 @@ if __name__ == '__main__':
     H, W = images_train.shape[1], images_train.shape[2]
     dataset = RaysData(images_train.to(cfg.device), K.to(cfg.device), c2ws_train.to(cfg.device), device=cfg.device)
 
-    dataloader = DataLoader(dataset, batch_size=16, shuffle=True, num_workers=0)
+    dataloader = DataLoader(dataset, batch_size=64, shuffle=True, num_workers=0)
 
     nerf_model = NerfModel(device=cfg.device).to(cfg.device)
-    optimizer = torch.optim.Adam(nerf_model.parameters(), lr=1e-3)
+    optimizer = torch.optim.Adam(nerf_model.parameters(), lr=1e-5)
 
     train_iter = make_infinite(dataloader)
     max_steps = 10000
@@ -117,18 +118,18 @@ if __name__ == '__main__':
         loss = -10 * torch.log10(1.0 / (mse_loss + 1e-6))
         
         optimizer.zero_grad()
-        loss.back_ward()
+        loss.backward()
         optimizer.step()
         
-        if step % 10 == 0:
-            print(f" steps: {step}/{max_step} mse_loss: {mse_loss} NSPR: {-loss}")
-        
         if step % 100 == 0:
-            r_os = dataset.rays_o[0:H*W, 3]
-            r_ds = dataset.rays_d[0:H*W, 3]
-            gt_rgbs = dataset.gt_rgbs[0:H*W, 3]
+            print(f" steps: {step}/{max_steps} mse_loss: {mse_loss} NSPR: {-loss}")
+        
+        if step % 1000 == 0:
+            r_os = dataset.rays_o[0:H*W, :]
+            r_ds = dataset.rays_d[0:H*W, :]
+            gt_rgbs = dataset.gt_rgbs[0:H*W, :]
             
-            xs = sample_along_rays(r_os, r_ds, gt_rgbs, cfg.near, cfg.far, cfg.num_samples_along_ray, device=cfg.device)
+            xs = sample_along_rays(r_os, r_ds, cfg.near, cfg.far, cfg.num_samples_along_ray, device=cfg.device)
             with torch.no_grad():
                 pred_rgb = predict_rgbs(nerf_model, xs, r_ds, cfg.near, cfg.far, cfg.num_samples_along_ray)
             pred_rgb = pred_rgb.view(H, W, 3).detach().cpu().numpy()
