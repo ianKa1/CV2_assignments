@@ -2,8 +2,9 @@ import torch
 import torch.nn as nn
 import tyro
 from PIL import Image
+from pathlib import Path
 
-from src.dataset_3d import load_data, RaysData
+from src.dataset_3d import load_data, RaysData, pixels_to_rays
 from src.rendering import sample_along_rays, predict_rgbs
 
 from torch.utils.data import Dataset, DataLoader
@@ -100,11 +101,24 @@ if __name__ == '__main__':
     dataloader = DataLoader(dataset, batch_size=64, shuffle=True, num_workers=0)
 
     nerf_model = NerfModel(device=cfg.device).to(cfg.device)
-    optimizer = torch.optim.Adam(nerf_model.parameters(), lr=1e-5)
+    optimizer = torch.optim.Adam(nerf_model.parameters(), lr=5e-4)
+
+    # Create output directory
+    output_dir = Path("3d_output")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create log file
+    log_path = output_dir / "training_log.txt"
+    log_file = open(log_path, 'w')
+    log_file.write(f"NeRF Training Log\n")
+    log_file.write(f"Data path: {cfg.data_path}\n")
+    log_file.write(f"Total steps: {10000}\n")
+    log_file.write(f"Learning rate: {5e-4}\n")
+    log_file.write(f"Batch size: {64}\n\n")
 
     train_iter = make_infinite(dataloader)
     max_steps = 10000
-    
+
     nerf_model.train()
     for step in range(max_steps):
         batch = next(train_iter)
@@ -122,9 +136,13 @@ if __name__ == '__main__':
         optimizer.step()
         
         if step % 100 == 0:
-            print(f" steps: {step}/{max_steps} mse_loss: {mse_loss} NSPR: {-loss}")
+            log_msg = f"steps: {step}/{max_steps}, MSE Loss: {mse_loss.item():.6f}, PSNR: {-loss.item():.2f}"
+            print(log_msg)
+            log_file.write(log_msg + "\n")
+            log_file.flush()
         
-        if step % 1000 == 0:
+        if step % 500 == 0:
+            
             r_os = dataset.rays_o[0:H*W, :]
             r_ds = dataset.rays_d[0:H*W, :]
             gt_rgbs = dataset.gt_rgbs[0:H*W, :]
@@ -138,8 +156,63 @@ if __name__ == '__main__':
 
             # Create and save image
             output_image = Image.fromarray(pred_rgb)
-            output_image.save(f"output_step{step}.png")
-        
-        
-        
+            output_image.save(output_dir / f"train_step{step}.png")
+            save_msg = f"Saved training image at step {step}"
+            print(save_msg)
+            log_file.write(save_msg + "\n")
+            log_file.flush()
+
+    # Evaluation: Render novel views using c2ws_test
+    eval_msg = "\n" + "="*50 + "\nStarting evaluation with test camera poses...\n" + "="*50
+    print(eval_msg)
+    log_file.write(eval_msg + "\n")
+    log_file.flush()
+
+    nerf_model.eval()
+    test_dir = output_dir / "test_views"
+    test_dir.mkdir(exist_ok=True)
+
+    num_test_views = c2ws_test.shape[0]
+    print(f"Rendering {num_test_views} test views...")
+
+    for test_idx in range(num_test_views):
+        # Generate rays for all pixels in this test view
+        us = torch.arange(W, device=cfg.device).float()
+        vs = torch.arange(H, device=cfg.device).float()
+        v_grid, u_grid = torch.meshgrid(vs, us, indexing='ij')
+        uv_grid = torch.stack([u_grid, v_grid], dim=-1)
+        uvs = uv_grid.reshape(-1, 2)  # [H*W, 2]
+
+        # Get camera-to-world matrix for this test view
+        c2w_test = c2ws_test[test_idx].to(cfg.device)
+
+        # Convert pixels to rays
+        r_os, r_ds = pixels_to_rays(K=K.to(cfg.device), c2w=c2w_test, uvs=uvs, device=cfg.device)
+
+        # Sample points along rays and render
+        xs = sample_along_rays(r_os, r_ds, cfg.near, cfg.far, cfg.num_samples_along_ray, device=cfg.device)
+        with torch.no_grad():
+            pred_rgb = predict_rgbs(nerf_model, xs, r_ds, cfg.near, cfg.far, cfg.num_samples_along_ray)
+
+        # Reshape to image and save
+        pred_rgb = pred_rgb.view(H, W, 3).detach().cpu().numpy()
+        pred_rgb = (pred_rgb * 255).clip(0, 255).astype('uint8')
+
+        output_image = Image.fromarray(pred_rgb)
+        output_image.save(test_dir / f"test_view_{test_idx:03d}.png")
+
+        if test_idx % 10 == 0:
+            progress_msg = f"Rendered test view {test_idx}/{num_test_views}"
+            print(progress_msg)
+            log_file.write(progress_msg + "\n")
+            log_file.flush()
+
+    final_msg = f"\nEvaluation complete! Test views saved to {test_dir}"
+    print(final_msg)
+    log_file.write(final_msg + "\n")
+
+    # Close log file
+    log_file.write(f"\nTraining and evaluation completed after {max_steps} steps\n")
+    log_file.close()
+    print(f"Training log saved to {log_path}")
 
