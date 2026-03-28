@@ -4,6 +4,7 @@ import torchvision.transforms as T
 from torch.utils.data import Dataset, DataLoader
 import torch.nn as nn
 import torch.nn.functional as F
+from pathlib import Path
 # x -> [batch_size]
 def sinusoidal_position_encoding(x, L, device=None):
     batch_size = x.shape[0]
@@ -80,8 +81,12 @@ class PixelSampleDataset(Dataset):
 if __name__ == "__main__":
     device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
 
+    image_path = "images/fox.jpg"
+    image_name = image_path.split("/")[-1].split(".")[0]
+    L = 10
+    hidden_size = 256
     dataset = PixelSampleDataset(
-        image_path="fox.jpg",
+        image_path=image_path,
         length=10000
     )
 
@@ -92,12 +97,23 @@ if __name__ == "__main__":
         num_workers=0
     )
 
-    model = MLP().to(device)
+    model = MLP(L=L, hidden_size=hidden_size).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 
     # Set the number of training steps
-    max_steps = 20000
-    
+    max_steps = 10000
+
+    # Create subdirectory for this training run
+    run_name = f"{image_name}_L{L}_width{hidden_size}"
+    output_dir = Path("2d_output") / run_name
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create log file
+    log_path = output_dir / "training_log.txt"
+    log_file = open(log_path, 'w')
+    log_file.write(f"Training {image_name} with L={L}, hidden_size={hidden_size}\n")
+    log_file.write(f"Total steps: {max_steps}\n\n")
+
     model.train()
     train_iter = make_infinite(dataloader)
     for step in range(max_steps):
@@ -116,9 +132,12 @@ if __name__ == "__main__":
         optimizer.step()
 
         if step % 10 == 0:
-            print(f"Step {step}/{max_steps}, PSNR: {PSNR.item():.2f}, MSELoss: {mse_loss.item():.4f}")
+            log_msg = f"Step {step}/{max_steps}, PSNR: {PSNR.item():.2f}, MSELoss: {mse_loss.item():.4f}"
+            print(log_msg)
+            log_file.write(log_msg + "\n")
+            log_file.flush()  # Ensure immediate write to disk
         
-        if step % (max_steps // 20) == 0:
+        if step % (max_steps // 10) == 0:
             output_H = dataset.H
             output_W = dataset.W
             output_channels = dataset.C
@@ -139,6 +158,14 @@ if __name__ == "__main__":
 
             # Create and save image
             output_image = Image.fromarray(pred_pixels_np)
-            output_image.save(f"output_step{step}.png")
+            output_image.save(output_dir / f"step{step}.png")
+            save_msg = f"Saved image at step {step}"
+            print(save_msg)
+            log_file.write(save_msg + "\n")
+            log_file.flush()
 
- 
+    # Close log file
+    log_file.write(f"\nTraining completed after {max_steps} steps\n")
+    log_file.close()
+    print(f"Training log saved to {log_path}")
+
